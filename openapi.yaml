@@ -3,23 +3,69 @@ info:
   title: Arch Morning View
   version: 0.1.0
   description: |
-    API for one advisor's morning review. The product scope is docs/SPEC.md.
-    Names are unique. The advisor never receives a client's checkmark.
+    HTTP contract for the frontend API client, `ArchService` in
+    `frontend/src/services/types.ts`. The UI calls those methods today.
+    Each operation below is one method. Field names and values match the
+    TypeScript types.
+
+    The frontend does not name a host. This server is the local app.
+
+    Send a session token as `Authorization: Bearer <token>`.
+    The UI prints an error body's `detail` string as the message.
+
+    No authentication:
+    - GET /advisor
+    - POST /advisor
+    - POST /login
+
+    Bearer token required:
+    - every other operation
+
+    GET /session is the exception among authenticated calls: an unknown
+    token returns 200 and `null`, not an error. The sign-in screen treats
+    `null` as signed out.
+
+    Advisor only, otherwise 403 "Only the advisor can do that.":
+    list, create, update, and delete clients; create, update, and delete
+    funds; create, update, and delete documents; set paid.
+
+    The owning client only, otherwise 403 "Only a client can do that.":
+    set checked. Another client's document is 404 "Document not found."
+
+    GET /clients/{clientId} is both roles. A client who asks for a
+    different client id gets 404 "Client not found."
+
+    Names are unique, compared without case. Passwords are never returned.
+    Ids are strings. A missing or unknown bearer token on a required
+    route is 401 "Please sign in again."
 servers:
   - url: http://127.0.0.1:8000
 tags:
-  - name: Setup
   - name: Session
   - name: Clients
   - name: Funds
   - name: Documents
 paths:
-  /setup:
+  /advisor:
+    get:
+      tags: [Session]
+      operationId: hasAdvisor
+      summary: Whether an advisor account exists
+      description: No authentication. ArchService.hasAdvisor.
+      responses:
+        "200":
+          description: True after the advisor account has been created
+          content:
+            application/json:
+              schema:
+                type: boolean
     post:
-      tags: [Setup]
-      summary: Create the advisor account
-      description: Succeeds only when no advisor account exists yet.
-      operationId: createAdvisor
+      tags: [Session]
+      operationId: setupAdvisor
+      summary: Create the advisor account and sign in
+      description: |
+        No authentication. ArchService.setupAdvisor.
+        Succeeds only when no advisor exists. The name is trimmed.
       requestBody:
         required: true
         content:
@@ -32,14 +78,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Session"
+                $ref: "#/components/schemas/AdvisorSession"
+        "400":
+          description: Name and password are required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Name and password are required.
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: The advisor already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: The advisor already exists.
   /login:
     post:
       tags: [Session]
-      summary: Sign in
       operationId: login
+      summary: Sign in
+      description: |
+        No authentication. ArchService.login.
+        The name is trimmed and matched without case.
       requestBody:
         required: true
         content:
@@ -54,69 +117,59 @@ paths:
               schema:
                 $ref: "#/components/schemas/Session"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: Wrong name or password.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Wrong name or password.
+  /session:
+    get:
+      tags: [Session]
+      operationId: getSession
+      summary: Load the session for a stored token
+      description: |
+        ArchService.getSession. Send the bearer token when one is stored.
+        An unknown token returns null. It does not return an error.
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The session, or null when the token is unknown
+          content:
+            application/json:
+              schema:
+                nullable: true
+                allOf:
+                  - $ref: "#/components/schemas/Session"
   /logout:
     post:
       tags: [Session]
-      summary: Sign out
       operationId: logout
+      summary: Sign out
+      description: |
+        Bearer token required. ArchService.logout.
+        An unknown token still returns 204.
       security:
         - bearerAuth: []
       responses:
         "204":
           description: Signed out
         "401":
-          $ref: "#/components/responses/Unauthorized"
-  /me:
-    get:
-      tags: [Session]
-      summary: Current account
-      operationId: getMe
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: The signed-in account
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Account"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-  /me/funds:
-    get:
-      tags: [Funds]
-      summary: The signed-in client's funds and documents
-      description: |
-        Client only. Each capital call includes the real paid status and that
-        client's checkmark.
-      operationId: listMyFunds
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: The client's funds, oldest fund first
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ClientFund"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/Unauthenticated"
   /clients:
     get:
       tags: [Clients]
-      summary: List clients
-      description: Advisor only.
       operationId: listClients
+      summary: List clients
+      description: Bearer token required. Advisor only. ArchService.listClients. Sorted by name.
       security:
         - bearerAuth: []
       responses:
         "200":
-          description: Clients, oldest first
+          description: Clients, sorted by name
           content:
             application/json:
               schema:
@@ -124,14 +177,16 @@ paths:
                 items:
                   $ref: "#/components/schemas/Client"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
     post:
       tags: [Clients]
-      summary: Create a client login
-      description: Advisor only.
       operationId: createClient
+      summary: Create a client login
+      description: |
+        Bearer token required. Advisor only. ArchService.createClient.
+        The name is trimmed. It must be unique without case.
       security:
         - bearerAuth: []
       requestBody:
@@ -147,91 +202,137 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Client"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/Conflict"
-  /clients/{clientId}:
-    get:
-      tags: [Clients]
-      summary: One client's morning screen
-      description: |
-        Advisor only. Unpaid capital calls are soonest due date first.
-        Funds and their documents follow, oldest first.
-      operationId: getClient
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/ClientId"
-      responses:
-        "200":
-          description: The selected client's screen
+        "400":
+          description: Name and password are required.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ClientScreen"
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Name and password are required.
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-    patch:
+          $ref: "#/components/responses/AdvisorOnly"
+        "409":
+          description: That name is already used.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: That name is already used.
+  /clients/{clientId}:
+    parameters:
+      - $ref: "#/components/parameters/ClientId"
+    get:
       tags: [Clients]
-      summary: Change a client's name or password
-      description: Advisor only. Omitted fields stay as they are.
-      operationId: updateClient
+      operationId: getClientOverview
+      summary: One client's morning screen
+      description: |
+        Bearer token required. ArchService.getClientOverview.
+        The advisor may open any client. A client may open only their own id.
+
+        `morning` lists unpaid capital calls, soonest due date first.
+        Each item has the fund name, title, and amount.
+        Funds are sorted by name. Documents under a fund are newest first.
+        A capital call includes `paid`. `checked` is included only when the
+        caller is that client, and then it is always true or false.
+        The advisor's documents do not include `checked`.
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/ClientId"
+      responses:
+        "200":
+          description: Morning list, funds, and documents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientOverview"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: Client not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Client not found.
+    patch:
+      tags: [Clients]
+      operationId: updateClient
+      summary: Change a client's name or password
+      description: |
+        Bearer token required. Advisor only. ArchService.updateClient.
+        Omitted fields stay as they are. An empty password is ignored.
+        A new name is trimmed and must be unique without case.
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CredentialsUpdate"
+              $ref: "#/components/schemas/ClientUpdate"
       responses:
         "200":
-          description: Client updated
+          description: Updated client
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Client"
+        "400":
+          description: Name is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Name is required.
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Client not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Client not found.
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: That name is already used.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: That name is already used.
     delete:
       tags: [Clients]
-      summary: Delete a client
-      description: Advisor only. Also deletes that client's funds and documents.
       operationId: deleteClient
+      summary: Delete a client
+      description: |
+        Bearer token required. Advisor only. ArchService.deleteClient.
+        Also deletes that client's login, sessions, funds, and documents.
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/ClientId"
       responses:
         "204":
           description: Client deleted
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: The mock deletes nothing when the id is unknown and still resolves. Return 204.
   /clients/{clientId}/funds:
     post:
       tags: [Funds]
-      summary: Add a fund
-      description: Advisor only.
       operationId: createFund
+      summary: Add a fund
+      description: Bearer token required. Advisor only. ArchService.createFund. The name is trimmed.
       security:
         - bearerAuth: []
       parameters:
@@ -249,22 +350,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Fund"
+        "400":
+          description: Fund name is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Fund name is required.
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Client not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Client not found.
   /funds/{fundId}:
+    parameters:
+      - $ref: "#/components/parameters/FundId"
     patch:
       tags: [Funds]
-      summary: Rename a fund
-      description: Advisor only.
       operationId: updateFund
+      summary: Rename a fund
+      description: Bearer token required. Advisor only. ArchService.updateFund. The name is trimmed.
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/FundId"
       requestBody:
         required: true
         content:
@@ -273,41 +388,63 @@ paths:
               $ref: "#/components/schemas/FundWrite"
       responses:
         "200":
-          description: Fund updated
+          description: Fund renamed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Fund"
+        "400":
+          description: Fund name is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Fund name is required.
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Fund not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Fund not found.
     delete:
       tags: [Funds]
-      summary: Delete a fund
-      description: Advisor only. Also deletes that fund's documents.
       operationId: deleteFund
+      summary: Delete a fund
+      description: |
+        Bearer token required. Advisor only. ArchService.deleteFund.
+        Also deletes that fund's documents.
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/FundId"
       responses:
         "204":
           description: Fund deleted
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Fund not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Fund not found.
   /funds/{fundId}/documents:
     post:
       tags: [Documents]
-      summary: File a document on a fund
-      description: Advisor only. A new capital call is unpaid.
       operationId: createDocument
+      summary: File a document on a fund
+      description: |
+        Bearer token required. Advisor only. ArchService.createDocument.
+        A new capital call is unpaid. `createdAt` is the filing time.
       security:
         - bearerAuth: []
       parameters:
@@ -317,75 +454,99 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DocumentWrite"
+              $ref: "#/components/schemas/DocumentInput"
       responses:
         "201":
           description: Document filed
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Document"
+                $ref: "#/components/schemas/FundDocument"
+        "400":
+          $ref: "#/components/responses/InvalidDocument"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Fund not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Fund not found.
   /documents/{documentId}:
-    patch:
+    parameters:
+      - $ref: "#/components/parameters/DocumentId"
+    put:
       tags: [Documents]
-      summary: Change a document
-      description: |
-        Advisor only. The type can change. Paid status and the client's
-        checkmark are unchanged by this call.
       operationId: updateDocument
+      summary: Replace a document's contents
+      description: |
+        Bearer token required. Advisor only. ArchService.updateDocument.
+        The body is the whole document, including a possible change of kind.
+        Paid status and any client checkmark stay as they are.
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/DocumentId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DocumentWrite"
+              $ref: "#/components/schemas/DocumentInput"
       responses:
         "200":
           description: Document updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Document"
+                $ref: "#/components/schemas/FundDocument"
+        "400":
+          $ref: "#/components/responses/InvalidDocument"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Document not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Document not found.
     delete:
       tags: [Documents]
-      summary: Delete a document
-      description: Advisor only.
       operationId: deleteDocument
+      summary: Delete a document
+      description: Bearer token required. Advisor only. ArchService.deleteDocument.
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/DocumentId"
       responses:
         "204":
           description: Document deleted
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Document not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Document not found.
   /documents/{documentId}/paid:
     patch:
       tags: [Documents]
-      summary: Set the real paid status
-      description: Advisor only. Only capital calls have a paid status.
       operationId: setPaid
+      summary: Set the real paid status
+      description: |
+        Bearer token required. Advisor only. ArchService.setPaid.
+        Only a capital call has a paid status. No response body.
+        Paid true removes the call from `morning`. Paid false puts it back.
       security:
         - bearerAuth: []
       parameters:
@@ -397,26 +558,37 @@ paths:
             schema:
               $ref: "#/components/schemas/PaidWrite"
       responses:
-        "200":
-          description: Paid status updated
+        "204":
+          description: Paid status saved
+        "400":
+          description: Only capital calls can be paid.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CapitalCall"
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Only capital calls can be paid.
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/AdvisorOnly"
         "404":
-          $ref: "#/components/responses/NotFound"
-  /documents/{documentId}/checkmark:
+          description: Document not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Document not found.
+  /documents/{documentId}/checked:
     patch:
       tags: [Documents]
+      operationId: setChecked
       summary: Set the client's own checkmark
       description: |
-        Signed-in client only, and only on that client's capital call.
-        This does not change paid status.
-      operationId: setCheckmark
+        Bearer token required. The owning client only. ArchService.setChecked.
+        The UI sends this for capital calls. It does not change `paid`.
+        No response body. The advisor never receives `checked`.
       security:
         - bearerAuth: []
       parameters:
@@ -426,69 +598,92 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CheckmarkWrite"
+              $ref: "#/components/schemas/CheckedWrite"
       responses:
-        "200":
-          description: Checkmark updated
+        "204":
+          description: Checkmark saved
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: Only a client can do that.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ClientCapitalCall"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Only a client can do that.
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Document not found. This includes a document owned by another client.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                detail: Document not found.
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
+      description: The `token` from a Session. Sent on every ArchService method that takes a token.
   parameters:
     ClientId:
       name: clientId
       in: path
       required: true
       schema:
-        type: integer
+        type: string
     FundId:
       name: fundId
       in: path
       required: true
       schema:
-        type: integer
+        type: string
     DocumentId:
       name: documentId
       in: path
       required: true
       schema:
-        type: integer
+        type: string
   responses:
-    Unauthorized:
-      description: Missing or invalid session
+    Unauthenticated:
+      description: Please sign in again.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-    Forbidden:
-      description: This account cannot do that
+          example:
+            detail: Please sign in again.
+    AdvisorOnly:
+      description: Only the advisor can do that.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-    NotFound:
-      description: No such record
+          example:
+            detail: Only the advisor can do that.
+    InvalidDocument:
+      description: |
+        One of: "A document needs a title.", "Amount due must be greater than zero.",
+        "Due date is required.", "An investor letter needs a summary.",
+        "Unknown document type."
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-    Conflict:
-      description: The name is already taken, or the advisor already exists
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
+          examples:
+            title:
+              value:
+                detail: A document needs a title.
+            amount:
+              value:
+                detail: Amount due must be greater than zero.
+            dueDate:
+              value:
+                detail: Due date is required.
+            summary:
+              value:
+                detail: An investor letter needs a summary.
   schemas:
     Error:
       type: object
@@ -496,50 +691,62 @@ components:
       properties:
         detail:
           type: string
+          description: Shown directly in the UI.
     Credentials:
       type: object
       required: [name, password]
       properties:
         name:
           type: string
-          minLength: 1
         password:
           type: string
-          minLength: 1
-    CredentialsUpdate:
+    ClientUpdate:
       type: object
       properties:
         name:
           type: string
-          minLength: 1
         password:
           type: string
-          minLength: 1
+          description: Omitted or empty leaves the current password in place.
     Session:
+      oneOf:
+        - $ref: "#/components/schemas/AdvisorSession"
+        - $ref: "#/components/schemas/ClientSession"
+      discriminator:
+        propertyName: role
+        mapping:
+          advisor: "#/components/schemas/AdvisorSession"
+          client: "#/components/schemas/ClientSession"
+    AdvisorSession:
       type: object
-      required: [token, account]
+      required: [token, role, name]
       properties:
         token:
           type: string
-        account:
-          $ref: "#/components/schemas/Account"
-    Account:
-      type: object
-      required: [id, name, role]
-      properties:
-        id:
-          type: integer
+        role:
+          type: string
+          enum: [advisor]
         name:
+          type: string
+    ClientSession:
+      type: object
+      required: [token, role, name, clientId]
+      properties:
+        token:
           type: string
         role:
           type: string
-          enum: [advisor, client]
+          enum: [client]
+        name:
+          type: string
+        clientId:
+          type: string
     Client:
       type: object
       required: [id, name]
       properties:
         id:
-          type: integer
+          type: string
         name:
           type: string
     FundWrite:
@@ -548,163 +755,148 @@ components:
       properties:
         name:
           type: string
-          minLength: 1
     Fund:
       type: object
-      required: [id, client_id, name]
+      required: [id, clientId, name]
       properties:
         id:
-          type: integer
-        client_id:
-          type: integer
+          type: string
+        clientId:
+          type: string
         name:
           type: string
-    AdvisorFund:
-      allOf:
-        - $ref: "#/components/schemas/Fund"
-        - type: object
-          required: [documents]
-          properties:
-            documents:
-              type: array
-              items:
-                $ref: "#/components/schemas/Document"
-    ClientFund:
-      allOf:
-        - $ref: "#/components/schemas/Fund"
-        - type: object
-          required: [documents]
-          properties:
-            documents:
-              type: array
-              items:
-                $ref: "#/components/schemas/ClientDocument"
-    UnpaidCapitalCall:
-      type: object
-      required: [id, fund_id, fund_name, amount_due, due_date]
-      properties:
-        id:
-          type: integer
-        fund_id:
-          type: integer
-        fund_name:
-          type: string
-        amount_due:
-          type: number
-        due_date:
-          type: string
-          format: date
-    ClientScreen:
-      type: object
-      required: [client, unpaid_capital_calls, funds]
-      properties:
-        client:
-          $ref: "#/components/schemas/Client"
-        unpaid_capital_calls:
-          type: array
-          items:
-            $ref: "#/components/schemas/UnpaidCapitalCall"
-        funds:
-          type: array
-          items:
-            $ref: "#/components/schemas/AdvisorFund"
-    DocumentWrite:
+    DocumentInput:
       oneOf:
-        - $ref: "#/components/schemas/CapitalCallWrite"
-        - $ref: "#/components/schemas/InvestorLetterWrite"
+        - $ref: "#/components/schemas/CapitalCallInput"
+        - $ref: "#/components/schemas/InvestorLetterInput"
       discriminator:
-        propertyName: type
+        propertyName: kind
         mapping:
-          capital_call: "#/components/schemas/CapitalCallWrite"
-          investor_letter: "#/components/schemas/InvestorLetterWrite"
-    CapitalCallWrite:
+          capital_call: "#/components/schemas/CapitalCallInput"
+          investor_letter: "#/components/schemas/InvestorLetterInput"
+    CapitalCallInput:
       type: object
-      required: [type, amount_due, due_date]
+      required: [kind, title, amount, dueDate]
       properties:
-        type:
+        kind:
           type: string
           enum: [capital_call]
-        amount_due:
-          type: number
-        due_date:
+        title:
           type: string
-          format: date
-    InvestorLetterWrite:
+          description: Trimmed. Empty is rejected.
+        amount:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+          description: Must be greater than zero.
+        dueDate:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+    InvestorLetterInput:
       type: object
-      required: [type, summary]
+      required: [kind, title, summary]
       properties:
-        type:
+        kind:
           type: string
           enum: [investor_letter]
+        title:
+          type: string
+          description: Trimmed. Empty is rejected.
         summary:
           type: string
-          minLength: 1
-    Document:
+          description: Trimmed. Empty is rejected.
+    FundDocument:
       oneOf:
         - $ref: "#/components/schemas/CapitalCall"
         - $ref: "#/components/schemas/InvestorLetter"
       discriminator:
-        propertyName: type
+        propertyName: kind
         mapping:
           capital_call: "#/components/schemas/CapitalCall"
           investor_letter: "#/components/schemas/InvestorLetter"
     CapitalCall:
-      type: object
-      required: [id, fund_id, type, amount_due, due_date, paid]
-      properties:
-        id:
-          type: integer
-        fund_id:
-          type: integer
-        type:
-          type: string
-          enum: [capital_call]
-        amount_due:
-          type: number
-        due_date:
-          type: string
-          format: date
-        paid:
-          type: boolean
-    InvestorLetter:
-      type: object
-      required: [id, fund_id, type, summary]
-      properties:
-        id:
-          type: integer
-        fund_id:
-          type: integer
-        type:
-          type: string
-          enum: [investor_letter]
-        summary:
-          type: string
-    ClientDocument:
-      oneOf:
-        - $ref: "#/components/schemas/ClientCapitalCall"
-        - $ref: "#/components/schemas/InvestorLetter"
-      discriminator:
-        propertyName: type
-        mapping:
-          capital_call: "#/components/schemas/ClientCapitalCall"
-          investor_letter: "#/components/schemas/InvestorLetter"
-    ClientCapitalCall:
       allOf:
-        - $ref: "#/components/schemas/CapitalCall"
+        - $ref: "#/components/schemas/CapitalCallInput"
         - type: object
-          required: [checked]
+          required: [id, fundId, createdAt, paid]
           properties:
+            id:
+              type: string
+            fundId:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
+            paid:
+              type: boolean
             checked:
               type: boolean
+              description: Present only on the owning client's overview. Absent for the advisor.
+    InvestorLetter:
+      allOf:
+        - $ref: "#/components/schemas/InvestorLetterInput"
+        - type: object
+          required: [id, fundId, createdAt]
+          properties:
+            id:
+              type: string
+            fundId:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
     PaidWrite:
       type: object
       required: [paid]
       properties:
         paid:
           type: boolean
-    CheckmarkWrite:
+    CheckedWrite:
       type: object
       required: [checked]
       properties:
         checked:
           type: boolean
+    MorningItem:
+      type: object
+      required: [documentId, fundId, fundName, title, amount, dueDate]
+      properties:
+        documentId:
+          type: string
+        fundId:
+          type: string
+        fundName:
+          type: string
+        title:
+          type: string
+        amount:
+          type: number
+        dueDate:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+    FundWithDocuments:
+      allOf:
+        - $ref: "#/components/schemas/Fund"
+        - type: object
+          required: [documents]
+          properties:
+            documents:
+              type: array
+              items:
+                $ref: "#/components/schemas/FundDocument"
+    ClientOverview:
+      type: object
+      required: [client, morning, funds]
+      properties:
+        client:
+          $ref: "#/components/schemas/Client"
+        morning:
+          type: array
+          description: Unpaid capital calls, soonest due date first.
+          items:
+            $ref: "#/components/schemas/MorningItem"
+        funds:
+          type: array
+          description: Sorted by fund name. Each fund's documents are newest first.
+          items:
+            $ref: "#/components/schemas/FundWithDocuments"
