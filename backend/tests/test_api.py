@@ -1,19 +1,25 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from arch_morning_view.app import app
+from arch_morning_view.db import DocumentRecord, FundRecord, User, init_db, reset_engine, session_scope
 from arch_morning_view.store import store
 
 
 @pytest.fixture(autouse=True)
-def empty_store():
-    store.reset()
+def fresh_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/test.sqlite3")
+    reset_engine()
+    init_db()
     yield
+    reset_engine()
 
 
 @pytest.fixture
 def client():
     with TestClient(app) as test_client:
+        store.reset()
         yield test_client
 
 
@@ -38,8 +44,10 @@ def test_first_run_creates_the_advisor_and_hashes_the_password(client: TestClien
     assert session["name"] == "Ada"
     assert "clientId" not in session
     assert client.get("/advisor").json() is True
-    assert all(row.password_hash != "password" for row in store.users)
-    assert all("password" not in row.password_hash for row in store.users)
+    with session_scope() as db:
+        hashes = db.scalars(select(User.password_hash)).all()
+    assert hashes
+    assert all(row != "password" and "password" not in row for row in hashes)
 
     again = client.post("/advisor", json={"name": "", "password": ""})
     assert again.status_code == 409
@@ -238,8 +246,9 @@ def test_deleting_a_client_removes_login_funds_and_documents(client: TestClient)
     assert client.post("/login", json={"name": "Bea", "password": "pw"}).status_code == 401
     overview = client.get(f"/clients/{bea['id']}", headers=headers)
     assert overview.status_code == 404
-    assert store.funds == []
-    assert store.documents == []
+    with session_scope() as db:
+        assert db.scalars(select(FundRecord)).all() == []
+        assert db.scalars(select(DocumentRecord)).all() == []
     assert client.delete("/clients/missing", headers=headers).status_code == 204
 
 
@@ -277,6 +286,16 @@ def test_rename_client_and_fund(client: TestClient):
     missing = client.post("/clients/missing/funds", headers=headers, json={"name": ""})
     assert missing.status_code == 404
     assert missing.json()["detail"] == "Client not found."
+
+
+def test_data_survives_a_new_connection(client: TestClient):
+    setup_advisor(client)
+    reset_engine()
+    init_db()
+    with TestClient(app) as again:
+        signed_in = again.post("/login", json={"name": "Ada", "password": "password"})
+    assert signed_in.status_code == 200
+    assert signed_in.json()["name"] == "Ada"
 
 
 def test_seeded_store_shows_a_morning_list():

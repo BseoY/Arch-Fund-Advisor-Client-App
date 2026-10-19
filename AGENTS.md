@@ -30,7 +30,7 @@ uv run pytest
 uv run uvicorn arch_morning_view.app:app --reload --port 8000
 ```
 
-The API is split into `routers`, `models`, `store`, and `auth`. The store is in memory and seeded on startup. Passwords are hashed. Protected routes use a bearer token.
+The API is split into `routers`, `models`, `store`, `auth`, and `db`. SQLAlchemy connects with `DATABASE_URL`. The default is `sqlite:///arch.sqlite3`. Another database, such as Postgres, is the same models with a different URL and driver. An empty database is seeded on startup. Passwords are hashed. Protected routes use a bearer token.
 
 ## Git
 
