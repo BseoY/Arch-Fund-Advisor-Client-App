@@ -1,0 +1,710 @@
+openapi: 3.0.3
+info:
+  title: Arch Morning View
+  version: 0.1.0
+  description: |
+    API for one advisor's morning review. The product scope is docs/SPEC.md.
+    Names are unique. The advisor never receives a client's checkmark.
+servers:
+  - url: http://127.0.0.1:8000
+tags:
+  - name: Setup
+  - name: Session
+  - name: Clients
+  - name: Funds
+  - name: Documents
+paths:
+  /setup:
+    post:
+      tags: [Setup]
+      summary: Create the advisor account
+      description: Succeeds only when no advisor account exists yet.
+      operationId: createAdvisor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "201":
+          description: Advisor created and signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /login:
+    post:
+      tags: [Session]
+      summary: Sign in
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /logout:
+    post:
+      tags: [Session]
+      summary: Sign out
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Signed out
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me:
+    get:
+      tags: [Session]
+      summary: Current account
+      operationId: getMe
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The signed-in account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /me/funds:
+    get:
+      tags: [Funds]
+      summary: The signed-in client's funds and documents
+      description: |
+        Client only. Each capital call includes the real paid status and that
+        client's checkmark.
+      operationId: listMyFunds
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The client's funds, oldest fund first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClientFund"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /clients:
+    get:
+      tags: [Clients]
+      summary: List clients
+      description: Advisor only.
+      operationId: listClients
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Clients, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Client"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Clients]
+      summary: Create a client login
+      description: Advisor only.
+      operationId: createClient
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Credentials"
+      responses:
+        "201":
+          description: Client created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /clients/{clientId}:
+    get:
+      tags: [Clients]
+      summary: One client's morning screen
+      description: |
+        Advisor only. Unpaid capital calls are soonest due date first.
+        Funds and their documents follow, oldest first.
+      operationId: getClient
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ClientId"
+      responses:
+        "200":
+          description: The selected client's screen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientScreen"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Clients]
+      summary: Change a client's name or password
+      description: Advisor only. Omitted fields stay as they are.
+      operationId: updateClient
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ClientId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialsUpdate"
+      responses:
+        "200":
+          description: Client updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      tags: [Clients]
+      summary: Delete a client
+      description: Advisor only. Also deletes that client's funds and documents.
+      operationId: deleteClient
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ClientId"
+      responses:
+        "204":
+          description: Client deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /clients/{clientId}/funds:
+    post:
+      tags: [Funds]
+      summary: Add a fund
+      description: Advisor only.
+      operationId: createFund
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ClientId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FundWrite"
+      responses:
+        "201":
+          description: Fund created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Fund"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /funds/{fundId}:
+    patch:
+      tags: [Funds]
+      summary: Rename a fund
+      description: Advisor only.
+      operationId: updateFund
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FundId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FundWrite"
+      responses:
+        "200":
+          description: Fund updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Fund"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Funds]
+      summary: Delete a fund
+      description: Advisor only. Also deletes that fund's documents.
+      operationId: deleteFund
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FundId"
+      responses:
+        "204":
+          description: Fund deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /funds/{fundId}/documents:
+    post:
+      tags: [Documents]
+      summary: File a document on a fund
+      description: Advisor only. A new capital call is unpaid.
+      operationId: createDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/FundId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentWrite"
+      responses:
+        "201":
+          description: Document filed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /documents/{documentId}:
+    patch:
+      tags: [Documents]
+      summary: Change a document
+      description: |
+        Advisor only. The type can change. Paid status and the client's
+        checkmark are unchanged by this call.
+      operationId: updateDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocumentWrite"
+      responses:
+        "200":
+          description: Document updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Document"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Documents]
+      summary: Delete a document
+      description: Advisor only.
+      operationId: deleteDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "204":
+          description: Document deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /documents/{documentId}/paid:
+    patch:
+      tags: [Documents]
+      summary: Set the real paid status
+      description: Advisor only. Only capital calls have a paid status.
+      operationId: setPaid
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaidWrite"
+      responses:
+        "200":
+          description: Paid status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapitalCall"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /documents/{documentId}/checkmark:
+    patch:
+      tags: [Documents]
+      summary: Set the client's own checkmark
+      description: |
+        Signed-in client only, and only on that client's capital call.
+        This does not change paid status.
+      operationId: setCheckmark
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckmarkWrite"
+      responses:
+        "200":
+          description: Checkmark updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientCapitalCall"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ClientId:
+      name: clientId
+      in: path
+      required: true
+      schema:
+        type: integer
+    FundId:
+      name: fundId
+      in: path
+      required: true
+      schema:
+        type: integer
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      schema:
+        type: integer
+  responses:
+    Unauthorized:
+      description: Missing or invalid session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: This account cannot do that
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: No such record
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: The name is already taken, or the advisor already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+    Credentials:
+      type: object
+      required: [name, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+    CredentialsUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+    Session:
+      type: object
+      required: [token, account]
+      properties:
+        token:
+          type: string
+        account:
+          $ref: "#/components/schemas/Account"
+    Account:
+      type: object
+      required: [id, name, role]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          type: string
+          enum: [advisor, client]
+    Client:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+    FundWrite:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+    Fund:
+      type: object
+      required: [id, client_id, name]
+      properties:
+        id:
+          type: integer
+        client_id:
+          type: integer
+        name:
+          type: string
+    AdvisorFund:
+      allOf:
+        - $ref: "#/components/schemas/Fund"
+        - type: object
+          required: [documents]
+          properties:
+            documents:
+              type: array
+              items:
+                $ref: "#/components/schemas/Document"
+    ClientFund:
+      allOf:
+        - $ref: "#/components/schemas/Fund"
+        - type: object
+          required: [documents]
+          properties:
+            documents:
+              type: array
+              items:
+                $ref: "#/components/schemas/ClientDocument"
+    UnpaidCapitalCall:
+      type: object
+      required: [id, fund_id, fund_name, amount_due, due_date]
+      properties:
+        id:
+          type: integer
+        fund_id:
+          type: integer
+        fund_name:
+          type: string
+        amount_due:
+          type: number
+        due_date:
+          type: string
+          format: date
+    ClientScreen:
+      type: object
+      required: [client, unpaid_capital_calls, funds]
+      properties:
+        client:
+          $ref: "#/components/schemas/Client"
+        unpaid_capital_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnpaidCapitalCall"
+        funds:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdvisorFund"
+    DocumentWrite:
+      oneOf:
+        - $ref: "#/components/schemas/CapitalCallWrite"
+        - $ref: "#/components/schemas/InvestorLetterWrite"
+      discriminator:
+        propertyName: type
+        mapping:
+          capital_call: "#/components/schemas/CapitalCallWrite"
+          investor_letter: "#/components/schemas/InvestorLetterWrite"
+    CapitalCallWrite:
+      type: object
+      required: [type, amount_due, due_date]
+      properties:
+        type:
+          type: string
+          enum: [capital_call]
+        amount_due:
+          type: number
+        due_date:
+          type: string
+          format: date
+    InvestorLetterWrite:
+      type: object
+      required: [type, summary]
+      properties:
+        type:
+          type: string
+          enum: [investor_letter]
+        summary:
+          type: string
+          minLength: 1
+    Document:
+      oneOf:
+        - $ref: "#/components/schemas/CapitalCall"
+        - $ref: "#/components/schemas/InvestorLetter"
+      discriminator:
+        propertyName: type
+        mapping:
+          capital_call: "#/components/schemas/CapitalCall"
+          investor_letter: "#/components/schemas/InvestorLetter"
+    CapitalCall:
+      type: object
+      required: [id, fund_id, type, amount_due, due_date, paid]
+      properties:
+        id:
+          type: integer
+        fund_id:
+          type: integer
+        type:
+          type: string
+          enum: [capital_call]
+        amount_due:
+          type: number
+        due_date:
+          type: string
+          format: date
+        paid:
+          type: boolean
+    InvestorLetter:
+      type: object
+      required: [id, fund_id, type, summary]
+      properties:
+        id:
+          type: integer
+        fund_id:
+          type: integer
+        type:
+          type: string
+          enum: [investor_letter]
+        summary:
+          type: string
+    ClientDocument:
+      oneOf:
+        - $ref: "#/components/schemas/ClientCapitalCall"
+        - $ref: "#/components/schemas/InvestorLetter"
+      discriminator:
+        propertyName: type
+        mapping:
+          capital_call: "#/components/schemas/ClientCapitalCall"
+          investor_letter: "#/components/schemas/InvestorLetter"
+    ClientCapitalCall:
+      allOf:
+        - $ref: "#/components/schemas/CapitalCall"
+        - type: object
+          required: [checked]
+          properties:
+            checked:
+              type: boolean
+    PaidWrite:
+      type: object
+      required: [paid]
+      properties:
+        paid:
+          type: boolean
+    CheckmarkWrite:
+      type: object
+      required: [checked]
+      properties:
+        checked:
+          type: boolean
