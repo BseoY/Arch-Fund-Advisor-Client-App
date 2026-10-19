@@ -18,6 +18,20 @@ Working rules for Arch Morning View.
 
 React, FastAPI, and SQLite. Passwords are stored hashed. The server is the source of truth for accounts, funds, documents, paid status, and each client’s checkmark.
 
+## Backend
+
+From `backend/`, use uv:
+
+```
+uv sync
+uv add <PACKAGE-NAME>
+uv run python <PYTHON-FILE>
+```
+
+## Git
+
+Commit completed work. Do not push unless asked.
+
 ## Scope
 
 Build only what `docs/SPEC.md` describes. An archive of deleted records is later work, not this MVP.
