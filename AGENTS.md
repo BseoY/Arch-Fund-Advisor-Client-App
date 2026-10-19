@@ -20,7 +20,7 @@ React, FastAPI, and SQLite. Passwords are stored hashed. The server is the sourc
 
 ## Backend
 
-From `backend/`, use uv:
+From the repository root, `make run` starts the API and `make test` runs the backend tests. From `backend/`, use uv:
 
 ```
 uv sync

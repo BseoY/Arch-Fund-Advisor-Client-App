@@ -41,13 +41,19 @@ export function ArchApp() {
   const [ready, setReady] = useState(false);
   const [hasAdvisor, setHasAdvisor] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      setHasAdvisor(await svc().hasAdvisor());
-      const t = localStorage.getItem(TOKEN_KEY);
-      if (t) setSession(await svc().getSession(t));
-      setReady(true);
+      try {
+        setHasAdvisor(await svc().hasAdvisor());
+        const t = localStorage.getItem(TOKEN_KEY);
+        if (t) setSession(await svc().getSession(t));
+      } catch (e) {
+        setBootError(e instanceof Error ? e.message : "The server is not reachable.");
+      } finally {
+        setReady(true);
+      }
     })();
   }, []);
 
@@ -63,6 +69,7 @@ export function ArchApp() {
   };
 
   if (!ready) return <div className="min-h-screen" />;
+  if (bootError && !session) return <p className="p-8 text-sm text-destructive">{bootError}</p>;
   if (!session) return <SignIn setup={!hasAdvisor} onSession={onSession} />;
 
   return (
