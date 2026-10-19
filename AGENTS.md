@@ -26,7 +26,11 @@ From `backend/`, use uv:
 uv sync
 uv add <PACKAGE-NAME>
 uv run python <PYTHON-FILE>
+uv run pytest
+uv run uvicorn arch_morning_view.app:app --reload --port 8000
 ```
+
+The API is split into `routers`, `models`, `store`, and `auth`. The store is in memory and seeded on startup. Passwords are hashed. Protected routes use a bearer token.
 
 ## Git
 
